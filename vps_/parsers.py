@@ -1,15 +1,21 @@
 from collections import OrderedDict
 import sys
+import helper
 
 
 def read_data(options):
 
     ret = {}
-    sys.stdout.write('Reading data from files ... ')
+    sys.stdout.write('Reading data files ... ')
     sys.stdout.flush()
     ret.update(read_variant_data_files(options))
     ret.update(parse_pa_files(options.palist))
     ret['gene_config_data'] = parse_gene_config_file(options.geneconfig)
+    ret['gene_config_data'] = helper.add_ee_positions(
+        ret['gene_config_data'],
+        ret['exon_endpoints_start'],
+        ret['exon_endpoints_end']
+    )
     print 'done'
     return ret
 
@@ -25,6 +31,8 @@ def read_variant_data_files(options):
             'AltKnown', 'AltHighest5', 'RefHighest5', 'AltHighest3', 'RefHighest3', 'Boundary5', 'Boundary3'
         ]
     )
+
+    ret['exon_endpoints_start'], ret['exon_endpoints_end'] = helper.exon_endpoints(ret['maxentscan_data'])
 
     ret['google_search_data'] = parse_variant_data_file(
         options.gs,
@@ -111,6 +119,59 @@ def parse_pa_files(fn):
     ret['pa_column_names'] = pa_column_names
 
     return ret
+
+
+
+
+def parse_gene_config_fileXXX(fn):
+
+    ret_nsy_automatic = {}
+    ret_nsy_review = {}
+    ret_ptv_and_splicing_automatic = {}
+    ret_ptv_and_splicing_review = {}
+
+
+    for line in open(fn):
+        line = line.strip()
+        if line == '' or line[0] == '#':
+            continue
+        cols = line.split()
+        if cols[2] == 'cDNAStart':
+            continue
+
+        gene = cols[0]
+
+        cdna_starts, cdna_ends = cols[2].split(','), cols[3].split(',')
+        for i in range(len(cdna_starts)):
+
+            region = {
+                'RegionType': cols[1],
+                'cDNAStart': cdna_starts[i],
+                'cDNAEnd': cdna_ends[i],
+                'CategoryType': cols[4]
+            }
+
+            if cols[1] == 'NSY':
+                if cols[4] == 'automatic':
+                    if gene not in ret_nsy_automatic:
+                        ret_nsy_automatic[gene] = []
+                    ret_nsy_automatic[gene].append(region)
+                elif cols[4] == 'review':
+                    if gene not in ret_nsy_review:
+                        ret_nsy_review[gene] = []
+                    ret_nsy_review[gene].append(region)
+
+            elif cols[1] in ['PTV', 'Splicing']:
+                if cols[4] == 'automatic':
+                    if gene not in ret_ptv_and_splicing_automatic:
+                        ret_ptv_and_splicing_automatic[gene] = []
+                    ret_ptv_and_splicing_automatic[gene].append(region)
+                elif cols[4] == 'review':
+                    if gene not in ret_ptv_and_splicing_review:
+                        ret_ptv_and_splicing_review[gene] = []
+                    ret_ptv_and_splicing_review[gene].append(region)
+
+    return ret_nsy_automatic, ret_nsy_review, ret_ptv_and_splicing_automatic, ret_ptv_and_splicing_review
 
 
 def parse_gene_config_file(fn):

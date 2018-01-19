@@ -18,9 +18,9 @@ def initialize_csv_file(out, pa_column_names):
         'CART_ID',
         'GeneSpecificPTVFlag',
         'InSilicoPTVCategory',
-        'MAX5',
+        'Max5',
         'PI5',
-        'MAX3',
+        'Max3',
         'PI3',
         'SpliceSiteScore',
         'PercentReduction',
@@ -35,7 +35,7 @@ def initialize_csv_file(out, pa_column_names):
         'AutomatedColour',
         'GSLink',
         'ExACLink',
-        'gnomADLink'
+        'gnomADLink',
         'Curation',
         'CurationDate'
     ]
@@ -95,18 +95,14 @@ def column_values(data, chrom, pos, ref, alt, gene, csn, class_):
     ret = {}
     key = '_'.join([chrom, pos, ref, alt])
 
-    if key not in data['maxentscan_data']:
-        # Must handle this case
-        pass
-
     # PI5, PI3, SpliceSiteScore, SpliceSiteType, PercentReduction, MAX5, MAX3
-    ret = maxentscan_values(ref, alt, key, data['maxentscan_data'], ret)
+    ret = maxentscan_values(key, data['maxentscan_data'], ret)
 
     # PA values
     ret['pa_values'] = process_pa_data(data['pa_data'], data['pa_column_names'], key)
 
     # GeneSpecificPAFlag, GeneSpecificPTVFlag, GeneSpecificSplicingFlag
-    ret = gene_specific_flags(data['pa_data'], data['gene_config_data'], gene, class_, csn, key, ret)
+    ret = gene_specific_flags(data['pa_data'], data['gene_config_data'], ret['SpliceSiteScore'], gene, class_, csn, key, ret)
 
     # InSilicoPACategory, InSilicoPTVCategory, InSilicoSplicingCategory
     ret = in_silico_categories(ret, data['maxentscan_data'], key)
@@ -128,27 +124,55 @@ def column_values(data, chrom, pos, ref, alt, gene, csn, class_):
 
 # Helper functions for calculating column values
 
-def maxentscan_values(ref, alt, key, maxentscan_data, values):
+def maxentscan_values(key, maxentscan_data, values):
 
-    if len(ref) == 1 and len(alt) == 1:
-        values['PI5'] = pi5(maxentscan_data, key)
-        values['PI3'] = pi3(maxentscan_data, key)
-        values.update(process_maxentscan_data(maxentscan_data, key))
-    else:
-        for x in ['PI5', 'PI3', 'RefKnown', 'SpliceSiteScore', 'SpliceSiteType', 'PercentReduction', 'MAX5', 'MAX3']:
-            values[x] = 'review'
+    values['PI5'] = pi5(maxentscan_data, key)
+    values['PI3'] = pi3(maxentscan_data, key)
+    values.update(process_maxentscan_data(maxentscan_data, key))
     return values
 
 
-def gene_specific_flags(pa_data, gene_config_data, gene, class_, csn, key, values):
+def gene_specific_flags(pa_data, gene_config_data, splice_site_score, gene, class_, csn, key, values):
+
+    # Automatic
 
     if key not in pa_data or class_ == 'IM':
         values['GeneSpecificPAFlag'] = '.'
     else:
-        values['GeneSpecificPAFlag'] = gene_specific_pa_flag(gene_config_data, gene, class_, csn)
-    values['GeneSpecificPTVFlag'] = gene_specific_ptv_flag(gene_config_data, gene, class_, csn)
-    values['GeneSpecificSplicingFlag'] = gene_specific_splicing_flag(gene_config_data, gene, class_, csn)
+        values['GeneSpecificPAFlag'] = gene_specific_pa_flag_automatic(gene_config_data, gene, csn)
+
+    values['GeneSpecificPTVFlag'] = gene_specific_ptv_flag_automatic(gene_config_data, gene, class_, csn)
+    values['GeneSpecificSplicingFlag'] = gene_specific_splicing_flag_automatic(gene_config_data, gene, class_, csn)
+
+    # Review
+
+    values['GeneSpecificPAFlag'] = gene_specific_pa_flag_review(values['GeneSpecificPAFlag'], gene_config_data, gene, csn)
+
+    if values['GeneSpecificPTVFlag'] != '.':
+        pos = extract_exonic_position(csn)
+        values['GeneSpecificPTVFlag'] = coordinate_overlaps_with_ptv_review_region(values['GeneSpecificPTVFlag'], gene_config_data, gene, pos)
+
+    if values['GeneSpecificSplicingFlag'] != '.' and splice_site_score != '.':
+        pos = extract_exonic_position(csn)
+        values['GeneSpecificSplicingFlag'] = coordinate_overlaps_with_ptv_review_region(values['GeneSpecificSplicingFlag'], gene_config_data, gene, pos)
+
+    if values['GeneSpecificSplicingFlag'] != '.':
+        pos = extract_exonic_position(csn)
+        values['GeneSpecificSplicingFlag'] = coordinate_overlaps_with_splicing_review_region(values['GeneSpecificSplicingFlag'], gene_config_data, gene, pos)
+
     return values
+
+
+def extract_exonic_position(csn):
+
+    tmp = csn[2:]
+    ret = ''
+    for c in tmp:
+        if c in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
+            ret += c
+        else:
+            return ret
+    return ret
 
 
 def in_silico_categories(values, maxentscan_data, key):
@@ -339,18 +363,94 @@ def process_maxentscan_data(maxentscan_data, key):
     ret['SpliceSiteType'] = 'spliceSiteRegion' if ret['SpliceSiteScore'] != '.' else '.'
     ret['PercentReduction'] = percent_reduction(maxentscan_data, ret['RefKnown'], key)
     d = maxentscan_data[key]
-    ret['MAX5'] = d['AltHighest5']
-    ret['MAX3'] = d['AltHighest3']
+    if d['AltKnown'] != '.':
+        ret['MAX5'] = '.'
+        ret['MAX3'] = '.'
+    else:
+        ret['MAX5'] = d['AltHighest5']
+        ret['MAX3'] = d['AltHighest3']
     return ret
 
 
 # Helper functions for calculating gene specific flags
+
+def gene_specific_ptv_flag_automatic(data, gene, class_, csn):
+
+    if class_ not in ['ESS', 'SG', 'FS']:
+        return '.'
+
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'PTV':
+                continue
+            if d['CategoryType'] != 'automatic':
+                continue
+            if csn_overlaps_with_region(csn, d):
+                return 'yes'
+    return 'no'
+
+
 
 def gene_specific_ptv_flag(gene_config_data, gene, class_, csn):
 
     if class_ not in ['ESS', 'SG', 'FS']:
         return '.'
     return proccess_overlap(gene_config_data, gene, csn, 'PTV')
+
+
+def gene_specific_splicing_flag_automatic(data, gene, class_, csn):
+
+    if class_ == 'IM':
+        return 'no'
+
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'Splicing':
+                continue
+            if d['CategoryType'] != 'automatic':
+                continue
+            if csn_overlaps_with_region(csn, d):
+                return 'yes'
+    return 'no'
+
+
+def gene_specific_ptv_flag_review(original, data, gene, csn):
+
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'PTV':
+                continue
+            if d['CategoryType'] != 'review':
+                continue
+            if csn_overlaps_with_region(csn, d):
+                return 'review'
+    return original
+
+
+def coordinate_overlaps_with_ptv_review_region(original, data, gene, pos):
+
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'PTV':
+                continue
+            if d['CategoryType'] != 'review':
+                continue
+            if coordinate_overlaps_with_region(pos, d):
+                return 'review'
+    return original
+
+
+def coordinate_overlaps_with_splicing_review_region(original, data, gene, pos):
+
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'Splicing':
+                continue
+            if d['CategoryType'] != 'review':
+                continue
+            if coordinate_overlaps_with_region(pos, d):
+                return 'review'
+    return original
 
 
 def gene_specific_splicing_flag(gene_config_data, gene, class_, csn):
@@ -360,19 +460,45 @@ def gene_specific_splicing_flag(gene_config_data, gene, class_, csn):
     return proccess_overlap(gene_config_data, gene, csn, 'Splicing')
 
 
-def gene_specific_pa_flag(gene_config_data, gene, class_, csn):
+def gene_specific_pa_flag_automatic(data, gene, csn):
 
-    if class_ != 'NSY':
-        return 'no'
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'NSY':
+                continue
+            if d['CategoryType'] != 'automatic':
+                continue
+            if csn_overlaps_with_region(csn, d):
+                return 'yes'
+    return 'no'
+
+
+def gene_specific_pa_flag_review(original, data, gene, csn):
+
+    if gene in data:
+        for d in data[gene]:
+            if d['RegionType'] != 'NSY':
+                continue
+            if d['CategoryType'] != 'review':
+                continue
+            if csn_overlaps_with_region(csn, d):
+                return 'review'
+    return original
+
+
+def gene_specific_pa_flag(gene_config_data, gene, csn):
+
     return proccess_overlap(gene_config_data, gene, csn, 'NSY')
 
 
 def proccess_overlap(gene_config_data, gene, csn, region_type):
 
+    region_types = [region_type]
+
     overlap = False
     if gene in gene_config_data:
         for d in gene_config_data[gene]:
-            if d['RegionType'] != region_type:
+            if d['RegionType'] not in region_types:
                 continue
             if csn_overlaps_with_region(csn, d):
                 overlap = True
@@ -401,6 +527,13 @@ def csn_overlaps_with_region(csn, region_def):
     else:
         region_variant = helper.Region(coord_part1, coord_part1) if coord_part2 is None else helper.Region(coord_part1, coord_part2)
         return region.overlaps(region_variant)
+
+
+def coordinate_overlaps_with_region(c, region_def):
+
+    region = helper.Region(region_def['cDNAStart'], region_def['cDNAEnd'])
+    region_variant = helper.Region(c, c)
+    return region.overlaps(region_variant)
 
 
 # Helper functions for calculating in silico categories

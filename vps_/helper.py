@@ -80,6 +80,11 @@ class Coordinate(object):
                 return -1
 
 
+    def __str__(self):
+
+        return self.as_str
+
+
 class Region(object):
 
     def __init__(self, start, end):
@@ -138,6 +143,7 @@ def increase_csn_coordinate(c):
 
 
 def float_digits(x):
+
     if type(x) == float:
         w = str("%.2f" % x)
         if '.' not in w:
@@ -155,9 +161,94 @@ def make_excel_link_str(link, text):
 
     if link == '.':
         return '.'
-    return '=\"HYPERLINK(\"\"{}\"\",\"\"{}\"\")\"'.format(link, text)
+    return '=HYPERLINK(\"{}\",\"{}\")'.format(link, text)
 
 
 def make_excel_text(text):
 
-    return '\"=\"\"{}\"\"\"'.format(text)
+    return '=\"{}\"'.format(text)
+
+
+def exon_endpoints(data):
+
+    ret_start = {}
+    ret_end = {}
+
+    for k,v in data.iteritems():
+
+        if v['CLASS'] == 'ESS':
+            x = v['CSN']
+            x = x[:x.find('_')]
+
+            if '-' in x:
+                idx = x.find('-')
+                endpoint = int(x[2:idx])
+                if v['GENE'] not in ret_start:
+                    ret_start[v['GENE']] = []
+                if endpoint not in ret_start[v['GENE']]:
+                    ret_start[v['GENE']].append(endpoint)
+            else:
+                idx = x.find('+')
+                endpoint = int(x[2:idx])
+                if v['GENE'] not in ret_end:
+                    ret_end[v['GENE']] = []
+                if endpoint not in ret_end[v['GENE']]:
+                    ret_end[v['GENE']].append(endpoint)
+
+    return ret_start, ret_end
+
+
+def add_ee_positions(gene_config_data, endpoints_start_data, endpoints_end_data):
+
+    new = {}
+
+    for gene, values_list in gene_config_data.iteritems():
+
+        tmp = []
+
+        for values in values_list:
+            if values['CategoryType'] != 'review':
+                continue
+            start, _ = split_coordinate(values['cDNAStart'])
+            end, _ = split_coordinate(values['cDNAEnd'])
+
+            if gene in endpoints_start_data:
+                if start in endpoints_start_data[gene]:
+                    tmp.append(
+                        {
+                            'RegionType': values['RegionType'],
+                            'cDNAStart': str(start),
+                            'cDNAEnd': str(start+2),
+                            'CategoryType': 'review'
+                        }
+                    )
+
+            if gene in endpoints_end_data:
+                if end in endpoints_end_data[gene]:
+                    tmp.append(
+                        {
+                            'RegionType': values['RegionType'],
+                            'cDNAStart': str(end-1),
+                            'cDNAEnd': str(end),
+                            'CategoryType': 'review'
+                        }
+                    )
+
+        if len(tmp) > 0:
+            new[gene] = tmp
+
+    for gene, v in new.iteritems():
+        gene_config_data[gene] += v
+
+    return gene_config_data
+
+
+def split_coordinate(s):
+
+    if '+' in s:
+        [x, y] = s.split('+')
+        return int(x), int(y)
+    if '-' in s:
+        [x, y] = s.split('-')
+        return int(x), -int(y)
+    return int(s), 0
