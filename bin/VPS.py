@@ -15,11 +15,11 @@ parser.add_option('--maxentscan', default=None, dest='maxentscan', action='store
 parser.add_option('--palist', default=None, dest='palist', action='store', help="PA list file")
 parser.add_option('--geneconfig', default=None, dest='geneconfig', action='store', help="Gene config file")
 parser.add_option('--gs', default=None, dest='gs', action='store', help="Google Scholar file")
-parser.add_option('--exac', default=None, dest='exac', action='store', help="...")
-parser.add_option('--gnomadex', default=None, dest='gnomadex', action='store', help="...")
-parser.add_option('--gnomadgen', default=None, dest='gnomadgen', action='store', help="...")
-parser.add_option('--curation', default=None, dest='curation', action='store', help="...")
-parser.add_option('--common', default=None, dest='common', action='store', help="...")
+parser.add_option('--exac', default=None, dest='exac', action='store', help="ExAC data file")
+parser.add_option('--gnomadex', default=None, dest='gnomadex', action='store', help="gnomAD exomes data file")
+parser.add_option('--gnomadgen', default=None, dest='gnomadgen', action='store', help="gnomAD genomes data file")
+parser.add_option('--curation', default=None, dest='curation', action='store', help="Curation data file")
+parser.add_option('--common', default=None, dest='common', action='store', help="Common variants data file")
 
 (options, args) = parser.parse_args()
 
